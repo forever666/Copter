@@ -33,7 +33,10 @@ float norm_acc_lpf;
 
 float mag_norm ,mag_norm_xyz ;
 
-xyz_f_t mag_sim_3d,acc_3d_hg,acc_ng,acc_ng_offset;
+xyz_f_t	mag_sim_3d,
+		acc_3d_hg,		//排除重力加速度影响的地理坐标系的三轴加速度值
+		acc_ng,			//排除重力加速度影响的机体坐标系三轴加速度值
+		acc_ng_offset;
 
 u8 acc_ng_cali;
 extern u8 fly_ready;
@@ -83,7 +86,7 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 	*/
 	
 	//由 reference_v 和 mag_tmp 计算出 mag_sim_3d
-	//reference_v	等效重力向量
+	//reference_v	等效重力向量（方向余弦矩阵第三列的三个数，是地理坐标系转到机体坐标系的值）
 	//mag_tmp		经过滤波的归一化磁通量数据
 	//mag_sim_3d	输出的角度数据
 	simple_3d_trans(&reference_v,&mag_tmp,&mag_sim_3d); 	//补偿飞机倾斜对磁场角度的影响
@@ -97,26 +100,54 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 	}
 	
 	//=============================================================================
-	// 计算等效重力向量
+	// 计算等效重力向量（生成reference_v.x/y/z）
 	
 	reference_v.x = 2*(ref_q[1]*ref_q[3] - ref_q[0]*ref_q[2]);
 	reference_v.y = 2*(ref_q[0]*ref_q[1] + ref_q[2]*ref_q[3]);
 	reference_v.z = 1 - 2*(ref_q[1]*ref_q[1] + ref_q[2]*ref_q[2]);//ref_q[0]*ref_q[0] - ref_q[1]*ref_q[1] - ref_q[2]*ref_q[2] + ref_q[3]*ref_q[3];
 
-	//这是把 四元数 换算成《方向余弦矩阵》中的第三列的三个元素。
-	//根据余弦矩阵和欧拉角的定义，地理坐标系的重力向量，转到机体坐标系，正好是这三个元素。
-	//所以这里的vx\y\z，其实就是当前的欧拉角（即四元数）的机体坐标参照系上，换算出来的重力单位向量。       
+	/*
+	
+	参考文献：http://www.cnblogs.com/andychenforever/p/6298073.html
+	
+	这是把 四元数 换算 成《方向余弦矩阵》中的第三列的三个元素。
+	根据余弦矩阵和欧拉角的定义，地理坐标系的重力向量，转到机体坐标系，正好是这三个元素。
+	
+	方向余弦矩阵第三列三个元素的含义就是地理坐标系G上的Z轴向机体坐标系B的(x,y,z)三个轴做投影的三个cos系数
+	
+	所以这里的v.x\v.y\v.z，其实就是当前的欧拉角（即四元数）的机体坐标参照系上，换算出来的重力单位向量。
+	
+	reference_v 是 重力向量（在地理坐标系Z轴、竖直向下1G）在机体坐标系上映射的向量
+	
+	reference_v.x 是 重力向量（在地理坐标系中为竖直向下的1G）在机体坐标系上x轴的分量
+	reference_v.y 是 重力向量（在地理坐标系中为竖直向下的1G）在机体坐标系上y轴的分量
+	reference_v.z 是 重力向量（在地理坐标系中为竖直向下的1G）在机体坐标系上z轴的分量
+	
+	方向余弦矩阵的第三列对应的是 kB 矩阵的三个值，是把 地理坐标系 上的的某个向量向 机体坐标系转换的三个系数
+	对应的含义是 地理坐标系 Z轴数值在 机体坐标系 三个轴上的投影
+	
+	x(机体)(地理Z轴分量) = reference_v.x * Z(地理)
+	y(机体)(地理Z轴分量) = reference_v.y * Z(地理)
+	z(机体)(地理Z轴分量) = reference_v.z * Z(地理)
+	
+	机体坐标系上的数值（由传感器直接测出）减去reference_v值，就是排除了重力的影响
+	
+	*/
+	
 	//=============================================================================
+	//加速度计校准
 
-	if(acc_ng_cali)
+	if(acc_ng_cali)	//加速度计校准，计算offset，要求此段代码执行时飞机处于静止状态
 	{
-		if(acc_ng_cali==2)
+		if(acc_ng_cali==2)	//acc_ng_cali在解锁一瞬间会被置2
 		{
 			acc_ng_offset.x = 0;
 			acc_ng_offset.y = 0;
 			acc_ng_offset.z = 0;
 		}
-			
+		
+		//加速度计的默认偏移量
+		//注：ax是加速度计输入值经过低通滤波的结果，没有进行归一化和单位变换，取值范围还是0-4095
 		acc_ng_offset.x += 10 *TO_M_S2 *(ax - 4096*reference_v.x) *0.0125f ;
 		acc_ng_offset.y += 10 *TO_M_S2 *(ay - 4096*reference_v.y) *0.0125f ;
 		acc_ng_offset.z += 10 *TO_M_S2 *(az - 4096*reference_v.z) *0.0125f ;	
@@ -128,13 +159,25 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 		}
 	}
 	
+	//=============================================================================
+	//计算地理坐标系Z轴加速度值
+	
+	//准确的xyz轴加速度（不包含重力加速度分量）
 	acc_ng.x = 10 *TO_M_S2 *(ax - 4096*reference_v.x) - acc_ng_offset.x;
 	acc_ng.y = 10 *TO_M_S2 *(ay - 4096*reference_v.y) - acc_ng_offset.y;
 	acc_ng.z = 10 *TO_M_S2 *(az - 4096*reference_v.z) - acc_ng_offset.z;
 	
+	//地球坐标系上飞机的z方向加速度值（垂直于地面方向）
+	//reference_v的三个数值可以用于把地理系Z轴映射到机体xyz，从物理意义上也能把机体xyz上的向量上的地理Z轴分量算出来
+	//这个变量用于高度数据融合
 	acc_3d_hg.z = acc_ng.x *reference_v.x + acc_ng.y *reference_v.y + acc_ng.z *reference_v.z;
 	
-
+	
+	
+	
+	//=============================================================================
+	//更新四元数
+	
 	// 计算加速度向量的模
 	norm_acc = my_sqrt(ax*ax + ay*ay + az*az);   
 
@@ -145,7 +188,7 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 		ay = ay / norm_acc;//4096.0f;
 		az = az / norm_acc;//4096.0f; 
 		
-		if( 3800 < norm_acc && norm_acc < 4400 )
+		if( 3800 < norm_acc && norm_acc < 4400 )	//在4096（1g）附近
 		{
 			/* 叉乘得到误差 */
 			ref.err_tmp.x = ay*reference_v.z - az*reference_v.y;
@@ -180,6 +223,8 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 	ref.err_Int.y = LIMIT(ref.err_Int.y, - IMU_INTEGRAL_LIM ,IMU_INTEGRAL_LIM );
 	ref.err_Int.z = LIMIT(ref.err_Int.z, - IMU_INTEGRAL_LIM ,IMU_INTEGRAL_LIM );
 	
+	//方向角矫正
+	//用 上一次的数据Yaw 对 地磁计输出的yaw_mag 进行矫正，得到 yaw_correct
 	if( reference_v.z > 0.0f )
 	{
 		if( fly_ready  )
@@ -192,11 +237,6 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 			yaw_correct = Kp *1.5f *To_180_degrees(yaw_mag - Yaw);	//对方向角进行低通滤波（滤波系数较大）
 			//没有解锁，视作开机时刻，快速纠正
 		}
-// 		if( yaw_correct>360 || yaw_correct < -360  )
-// 		{
-// 			yaw_correct = 0;
-// 			//限制纠正范围+-360，配合+-180度取值函数
-// 		}
 	}
 	else
 	{
@@ -214,7 +254,7 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 	ref_q[0] = ref_q[0] +(-ref_q[1]*ref.g.x - ref_q[2]*ref.g.y - ref_q[3]*ref.g.z)*half_T;
 	ref_q[1] = ref_q[1] + (ref_q[0]*ref.g.x + ref_q[2]*ref.g.z - ref_q[3]*ref.g.y)*half_T;
 	ref_q[2] = ref_q[2] + (ref_q[0]*ref.g.y - ref_q[1]*ref.g.z + ref_q[3]*ref.g.x)*half_T;
-	ref_q[3] = ref_q[3] + (ref_q[0]*ref.g.z + ref_q[1]*ref.g.y - ref_q[2]*ref.g.x)*half_T;  
+	ref_q[3] = ref_q[3] + (ref_q[0]*ref.g.z + ref_q[1]*ref.g.y - ref_q[2]*ref.g.x)*half_T;
 
 	/* 四元数规一化 normalise quaternion */
 	norm_q = my_sqrt(ref_q[0]*ref_q[0] + ref_q[1]*ref_q[1] + ref_q[2]*ref_q[2] + ref_q[3]*ref_q[3]);
@@ -223,10 +263,12 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 	ref_q[2] = ref_q[2] / norm_q;
 	ref_q[3] = ref_q[3] / norm_q;
 	
-	//解算出的三轴角度
+	//=============================================================================
+	
+	//解算出的三轴角度（四元数转姿态角）
 	*rol = fast_atan2(2*(ref_q[0]*ref_q[1] + ref_q[2]*ref_q[3]),1 - 2*(ref_q[1]*ref_q[1] + ref_q[2]*ref_q[2])) *57.3f;
 	*pit = asin(2*(ref_q[1]*ref_q[3] - ref_q[0]*ref_q[2])) *57.3f;
-	*yaw = fast_atan2(2*(-ref_q[1]*ref_q[2] - ref_q[0]*ref_q[3]), 2*(ref_q[0]*ref_q[0] + ref_q[1]*ref_q[1]) - 1) *57.3f;// 
+	*yaw = fast_atan2(2*(-ref_q[1]*ref_q[2] - ref_q[0]*ref_q[3]), 2*(ref_q[0]*ref_q[0] + ref_q[1]*ref_q[1]) - 1) *57.3f;//
 	//*yaw = yaw_mag;
 
 }
@@ -234,3 +276,8 @@ void IMUupdate(float half_T,float gx, float gy, float gz, float ax, float ay, fl
 
 /******************* (C) COPYRIGHT 2014 ANO TECH *****END OF FILE************/
 
+// 		if( yaw_correct>360 || yaw_correct < -360  )
+// 		{
+// 			yaw_correct = 0;
+// 			//限制纠正范围+-360，配合+-180度取值函数
+// 		}

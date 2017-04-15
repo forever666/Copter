@@ -13,8 +13,8 @@
 
 //================系统===================
 
-#define USE_US100			//使用us100型号超声波
-//#define	USE_KS103			//使用KS103型号超声波
+//#define USE_US100			//使用us100型号超声波
+#define	USE_KS103			//使用KS103型号超声波
 
 #define MAXMOTORS 			(4)		//电机数量
 #define GET_TIME_NUM 		(5)		//设置获取时间的数组数量
@@ -47,7 +47,7 @@
 #define FIX_GYRO_Y 			1.02f				//陀螺仪Y轴固有补偿
 #define FIX_GYRO_X 			1.02f				//陀螺仪X轴固有补偿
 
-#define TO_M_S2 			0.23926f   			//  980cm/s2    +-8g   980/4096
+#define TO_M_S2 			0.23926f   			//  980cm/s2    +-8g	980/4096
 #define ANGLE_TO_RADIAN 	0.01745329f 		//  *0.01745 = /57.3	角度转弧度
 
 #define MAX_ACC  4096.0f						//  +-8G		加速度计量程
@@ -82,6 +82,7 @@ enum
 //================控制=====================
 #define MAX_VERTICAL_SPEED_UP	5000										//最大上升速度mm/s
 #define MAX_VERTICAL_SPEED_DW	3000										//最大下降速度mm/s
+#define MAX_VERTICAL_SPEED_LAND	300										//近地面区域最大下降速度mm/s
 
 #define MAX_CTRL_ANGLE			30.0f										//遥控能达到的最大角度
 #define ANGLE_TO_MAX_AS 		30.0f										//角度误差N时，期望角速度达到最大（可以通过调整CTRL_2的P值调整）

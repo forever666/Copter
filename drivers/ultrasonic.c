@@ -13,7 +13,7 @@ void Ultrasonic_Init()
 	u8 temp[3];
 	temp[0] = 0xe8;			//默认地址是0xe8
 	temp[1] = 0x02;
-	temp[2] = 0x75;			//DC-DC降压模块环境下用72或73（0x70-0x75，其中0x70对应供电稳定性最好、滤波等级最低的情况）
+	temp[2] = 0x73;			//DC-DC降压模块环境下用72或73（0x70-0x75，其中0x70对应供电稳定性最好、滤波等级最低的情况）
 	Uart5_Send(temp ,3);
 	
 	Delay_ms(2000);			//延时2s，等待KS103超声波传感器设置生效
@@ -88,13 +88,21 @@ void Ultra_Get(u8 com_data)
 	}
 	else if( ultra_start_f == 2 )	//返回了第二个数值（低八位）
 	{
-		ultra.height =  ((ultra_tmp<<8) + com_data)/10;		//传入数据单位是mm，÷10后单位是cm
+		ultra.height =  ((ultra_tmp<<8) + com_data)/10;		//单位是cm（传入数据单位是mm，÷10后单位是cm）
 		
-		if(ultra.height < 500) // 5米范围内认为有效，跳变值约10米.
+		#if defined(USE_KS103)
+		if(ultra.height < 180) // KS103在1.8m内数据稳定
 		{
 			ultra.relative_height = ultra.height;	//单位是cm
 			ultra.measure_ok = 1;
 		}
+		#elif defined(USE_US100)
+		if(ultra.height < 500) // US100在5m内可用
+		{
+			ultra.relative_height = ultra.height;	//单位是cm
+			ultra.measure_ok = 1;
+		}
+		#endif
 		else
 		{
 			ultra.measure_ok = 2; //数据超范围
